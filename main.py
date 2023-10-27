@@ -32,13 +32,6 @@ Base = declarative_base()
 # Password hashing and verification
 password_hasher = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# OAuth2
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
-
-# JWT settings
-SECRET_KEY = os.environ.get("SECRET_KEY")
-ALGORITHM = "HS256"
 
 
 # Create the users table
@@ -95,16 +88,7 @@ def get_user_by_username(db: Session, username: str):
     return db.query(User).filter(User.username == username).first()
 
 
-# Function to create a JWT token
-def create_access_token(data: dict, expires_delta: timedelta = None):
-    to_encode = data.copy()
-    if expires_delta:
-        expire = datetime.utcnow() + expires_delta
-    else:
-        expire = datetime.utcnow() + timedelta(minutes=15)
-    to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
+
 
 
 # Dependency to get a database session
@@ -125,18 +109,7 @@ def register_user(user: UserCreate, db: Session = Depends(get_db)):
     return create_user(db, user)
 
 
-# Route to authenticate a user and issue a JWT token
-@app.post("/token/", response_model=Token)
-def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
-    db = SessionLocal()
-    user = get_user_by_username(db, form_data.username)
-    if user is None or not password_hasher.verify(form_data.password, user.hashed_password):
-        raise HTTPException(status_code=400, detail="Incorrect username or password")
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": user.username}, expires_delta=access_token_expires
-    )
-    return {"access_token": access_token, "token_type": "bearer"}
+
 
 
 class Item(Base):
@@ -195,69 +168,83 @@ class ItemResponse(BaseModel):
     quantity: int
 
 
-# Define the get_current_user function to retrieve the currently authenticated user
-def get_current_user(token: str = Depends(oauth2_scheme)):
-    # Replace this with your actual authentication logic
-    # For example, decode the token, verify the user's identity, and return user information
-    # You can use PyJWT or any other library to decode the token
-    # For this example, we're returning a dummy username
 
-    # Example authentication logic:
-    username = "example_user"
-    if username is None:
-        raise HTTPException(status_code=401, detail="Could not validate credentials")
-    return username
-
+# Pydantic model for item creation
 class ItemCreate(BaseModel):
     name: str
     description: str
     price: float
     quantity: int
 
-# Route to create a new item
-@app.post("/items/", response_model=ItemResponse)
-def create_new_item(item_data: ItemCreate, db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
-    db_item = Item(**item_data.dict())
-    db.add(db_item)
-    db.commit()
-    db.refresh(db_item)
-    return db_item
-
-# Route to get an item by ID
-@app.get("/items/{item_id}", response_model=ItemResponse)
-def read_item(item_id: int, db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
-    item = get_item_by_id(db, item_id)
-    if item is None:
-        raise HTTPException(status_code=404, detail="Item not found")
-    return item
-
-# Route to get all items
-@app.get("/items/", response_model=List[ItemResponse])
-def read_items(db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
-    items = get_all_items(db)
-    return items
-
+# Pydantic model for item update
 class ItemUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     price: Optional[float] = None
     quantity: Optional[int] = None
 
-# Route to update an item by ID
-@app.put("/items/{item_id}", response_model=ItemResponse)
-def update_item_by_id(item_id: int, item_data: ItemUpdate, db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
-    item = update_item(db, item_id, item_data.dict(exclude_unset=True))
+# Route to create a new item
+@app.post("/items/", response_model=ItemCreate)
+def create_new_item(item_data: ItemCreate, username: str, password: str):
+    # Add authentication logic here to validate the username and password
+    # Example: if username == "your_username" and password == "your_password":
+    db = SessionLocal()
+    db_item = Item(**item_data.dict())
+    db.add(db_item)
+    db.commit()
+    db.refresh(db_item)
+    db.close()
+    return db_item
+
+# Route to get an item by ID
+@app.get("/items/{item_id}", response_model=ItemCreate)
+def read_item(item_id: int, username: str, password: str):
+    # Add authentication logic here to validate the username and password
+    # Example: if username == "your_username" and password == "your_password":
+    db = SessionLocal()
+    item = db.query(Item).filter(Item.id == item_id).first()
+    db.close()
     if item is None:
         raise HTTPException(status_code=404, detail="Item not found")
     return item
 
+# Route to get all items
+@app.get("/items/", response_model=List[ItemCreate])
+def read_items(username: str, password: str):
+    # Add authentication logic here to validate the username and password
+    # Example: if username == "your_username" and password == "your_password":
+    db = SessionLocal()
+    items = db.query(Item).all()
+    db.close()
+    return items
+
+# Route to update an item by ID
+@app.put("/items/{item_id}", response_model=ItemCreate)
+def update_item_by_id(item_id: int, item_data: ItemUpdate, username: str, password: str):
+    # Add authentication logic here to validate the username and password
+    # Example: if username == "your_username" and password == "your_password":
+    db = SessionLocal()
+    db_item = db.query(Item).filter(Item.id == item_id).first()
+    if db_item:
+        for key, value in item_data.dict(exclude_unset=True).items():
+            setattr(db_item, key, value)
+        db.commit()
+        db.refresh(db_item)
+        db.close()
+    return db_item
+
 # Route to delete an item by ID
-@app.delete("/items/{item_id}", response_model=ItemResponse)
-def delete_item_by_id(item_id: int, db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
-    item = delete_item(db, item_id)
-    if item is None:
-        raise HTTPException(status_code=404, detail="Item not found")
-    return item
+@app.delete("/items/{item_id}", response_model=ItemCreate)
+def delete_item_by_id(item_id: int, username: str, password: str):
+    # Add authentication logic here to validate the username and password
+    # Example: if username == "your_username" and password == "your_password":
+    db = SessionLocal()
+    db_item = db.query(Item).filter(Item.id == item_id).first()
+    if db_item:
+        db.delete(db_item)
+        db.commit()
+        db.close()
+    return db_item
 
 if __name__ == "__main__":
     import uvicorn
